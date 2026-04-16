@@ -1,11 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { AssigneeColumn } from "@/components/AssigneeColumn";
 import { CalendarView } from "@/components/CalendarView";
 import { TaskForm } from "@/components/TaskForm";
-import { initialTasks } from "@/lib/data";
 import {
   TASK_STATUS_STYLES,
   assigneeOptions,
@@ -15,10 +14,53 @@ import {
 } from "@/lib/tasks";
 
 export default function DashboardPage() {
-  const [tasks, setTasks] = useState<DevOpsTask[]>(initialTasks);
+  const [tasks, setTasks] = useState<DevOpsTask[]>([]);
   const [activeView, setActiveView] = useState<"board" | "timeline">("board");
   const [selectedProject, setSelectedProject] = useState("All projects");
   const [selectedAssignee, setSelectedAssignee] = useState("All assignees");
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadTasks() {
+      try {
+        setIsLoading(true);
+        setErrorMessage(null);
+
+        const response = await fetch("/api/tasks", { cache: "no-store" });
+        const payload = (await response.json()) as {
+          tasks?: DevOpsTask[];
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Unable to load tasks.");
+        }
+
+        if (!ignore) {
+          setTasks(payload.tasks ?? []);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setErrorMessage(
+            error instanceof Error ? error.message : "Unable to load tasks.",
+          );
+        }
+      } finally {
+        if (!ignore) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadTasks();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const projectOptions = useMemo(() => {
     return ["All projects", ...Array.from(new Set(tasks.map((task) => task.project)))];
@@ -56,17 +98,27 @@ export default function DashboardPage() {
     );
   }, [filteredTasks]);
 
-  const handleCreateTask = (newTask: NewTaskInput) => {
-    setTasks((currentTasks) => [
-      {
-        ...newTask,
-        id:
-          currentTasks.length === 0
-            ? 1
-            : Math.max(...currentTasks.map((task) => task.id)) + 1,
+  const handleCreateTask = async (newTask: NewTaskInput) => {
+    setErrorMessage(null);
+
+    const response = await fetch("/api/tasks", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-      ...currentTasks,
-    ]);
+      body: JSON.stringify(newTask),
+    });
+
+    const payload = (await response.json()) as {
+      task?: DevOpsTask;
+      error?: string;
+    };
+
+    if (!response.ok || !payload.task) {
+      throw new Error(payload.error ?? "Unable to create task.");
+    }
+
+    setTasks((currentTasks) => [payload.task as DevOpsTask, ...currentTasks]);
   };
 
   return (
@@ -113,6 +165,12 @@ export default function DashboardPage() {
           </div>
         </section>
 
+        {errorMessage ? (
+          <section className="rounded-[24px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
+            {errorMessage}
+          </section>
+        ) : null}
+
         <section className="rounded-[28px] border border-white/70 bg-white/80 p-4 shadow-panel backdrop-blur sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="inline-flex w-fit rounded-2xl bg-slate-100 p-1">
@@ -153,7 +211,11 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {activeView === "board" ? (
+        {isLoading ? (
+          <section className="rounded-[28px] border border-white/70 bg-white/80 p-8 text-sm text-slate-500 shadow-panel backdrop-blur">
+            Loading tasks...
+          </section>
+        ) : activeView === "board" ? (
           <section className="grid gap-4 xl:grid-cols-4">
             {groupedTasks.map(({ assignee, tasks: assigneeTasks }) => (
               <AssigneeColumn key={assignee} assignee={assignee} tasks={assigneeTasks} />

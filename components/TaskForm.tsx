@@ -6,7 +6,7 @@ import { type NewTaskInput } from "@/lib/tasks";
 
 type TaskFormProps = {
   assigneeOptions: string[];
-  onSubmit: (task: NewTaskInput) => void;
+  onSubmit: (task: NewTaskInput) => Promise<void>;
 };
 
 const today = new Date().toISOString().slice(0, 10);
@@ -23,6 +23,8 @@ const initialFormState: NewTaskInput = {
 
 export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [labelInput, setLabelInput] = useState("");
   const [formData, setFormData] = useState<NewTaskInput>(initialFormState);
 
@@ -53,14 +55,29 @@ export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
     setIsOpen(false);
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!formData.project || !formData.projectManager || !formData.title || !formData.assignee) {
       return;
     }
 
-    onSubmit(formData);
-    resetForm();
+    if (formData.endDate < formData.startDate) {
+      setSubmitError("End date must be the same as or later than the start date.");
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setSubmitError(null);
+      await onSubmit(formData);
+      resetForm();
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : "Unable to save the task right now.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -193,18 +210,23 @@ export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
             </Field>
 
             <div className="flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:justify-end">
+              {submitError ? (
+                <p className="text-sm text-rose-300 sm:mr-auto">{submitError}</p>
+              ) : null}
               <button
                 type="button"
                 onClick={resetForm}
+                disabled={isSaving}
                 className="rounded-2xl border border-white/15 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/5"
               >
                 Cancel
               </button>
               <button
                 type="submit"
+                disabled={isSaving}
                 className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
               >
-                Save task
+                {isSaving ? "Saving..." : "Save task"}
               </button>
             </div>
           </form>

@@ -12,6 +12,19 @@ export type DevOpsTask = {
 
 export type NewTaskInput = Omit<DevOpsTask, "id" | "completed">;
 
+export type TaskRecord = {
+  id: number;
+  project: string;
+  project_manager: string;
+  title: string;
+  assignee: string;
+  start_date: string;
+  end_date: string;
+  labels: string[] | null;
+  completed: boolean | null;
+  created_at?: string;
+};
+
 export const assigneeOptions = ["Maya Chen", "Rohan Patel", "Elena Brooks", "James Kim"];
 
 export const TASK_STATUS_STYLES = {
@@ -89,6 +102,33 @@ export function isTaskOnDate(task: DevOpsTask, date: string) {
   const end = toDate(task.endDate);
 
   return day >= start && day <= end;
+}
+
+export function toTask(record: TaskRecord): DevOpsTask {
+  return {
+    id: record.id,
+    project: record.project,
+    projectManager: record.project_manager,
+    title: record.title,
+    assignee: record.assignee,
+    startDate: record.start_date,
+    endDate: record.end_date,
+    labels: record.labels ?? [],
+    completed: record.completed ?? false,
+  };
+}
+
+export function toTaskInsert(task: NewTaskInput) {
+  return {
+    project: task.project,
+    project_manager: task.projectManager,
+    title: task.title,
+    assignee: task.assignee,
+    start_date: task.startDate,
+    end_date: task.endDate,
+    labels: task.labels,
+    completed: false,
+  };
 }
 
 function toDate(value: string) {
