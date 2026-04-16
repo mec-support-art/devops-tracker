@@ -42,10 +42,14 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const payload = (await request.json()) as NewTaskInput;
+  const isLeaveEntry = payload.taskType === "leave";
 
-  if (!payload.project || !payload.projectManager || !payload.title || !payload.assignee) {
+  if (
+    !payload.assignee ||
+    (!isLeaveEntry && (!payload.project || !payload.requester || !payload.title))
+  ) {
     return NextResponse.json(
-      { error: "Project, manager, title, and assignee are required." },
+      { error: "Assignee is required. Tasks also need a project, requester, and title." },
       { status: 400 },
     );
   }

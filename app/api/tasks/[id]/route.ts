@@ -31,6 +31,7 @@ export async function PATCH(
   }
 
   const body = (await request.json()) as Partial<UpdateTaskInput>;
+  const isLeaveEntry = body.taskType === "leave";
 
   if (typeof body.completed !== "boolean") {
     return NextResponse.json(
@@ -41,18 +42,23 @@ export async function PATCH(
 
   const payload: UpdateTaskInput = normalizeTaskInput({
     project: body.project ?? "",
-    projectManager: body.projectManager ?? "",
+    requester: body.requester ?? "",
     title: body.title ?? "",
     assignee: body.assignee ?? "",
     startDate: body.startDate ?? "",
     endDate: body.endDate ?? "",
     labels: Array.isArray(body.labels) ? body.labels : [],
     completed: body.completed,
+    taskType: body.taskType,
+    leaveReason: body.leaveReason ?? "",
   });
 
-  if (!payload.project || !payload.projectManager || !payload.title || !payload.assignee) {
+  if (
+    !payload.assignee ||
+    (!isLeaveEntry && (!payload.project || !payload.requester || !payload.title))
+  ) {
     return NextResponse.json(
-      { error: "Project, manager, title, and assignee are required." },
+      { error: "Assignee is required. Tasks also need a project, requester, and title." },
       { status: 400 },
     );
   }

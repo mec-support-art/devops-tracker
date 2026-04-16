@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "DevOps Task Tracker",
-  description: "A visual DevOps task dashboard for project managers.",
+  description: "A visual DevOps task dashboard for resource planning and requester tracking.",
 };
 
 export default function RootLayout({

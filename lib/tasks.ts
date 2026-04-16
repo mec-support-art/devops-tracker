@@ -1,33 +1,36 @@
 export type DevOpsTask = {
   id: number;
   project: string;
-  projectManager: string;
+  requester: string;
   title: string;
   assignee: string;
   startDate: string;
   endDate: string;
   labels: string[];
   completed?: boolean;
+  taskType?: TaskType;
+  leaveReason?: string;
 };
 
 export type NewTaskInput = Omit<DevOpsTask, "id" | "completed">;
 export type UpdateTaskInput = NewTaskInput & { completed: boolean };
 export type TaskStatus = keyof typeof TASK_STATUS_STYLES;
+export type TaskType = "task" | "leave";
 
 export type TaskRecord = {
   id: number;
   project: string;
-  project_manager: string;
+  requester: string;
   title: string;
   assignee: string;
   start_date: string;
   end_date: string;
   labels: string[] | null;
   completed: boolean | null;
+  task_type: TaskType | null;
+  leave_reason: string | null;
   created_at?: string;
 };
-
-export const assigneeOptions = ["Maya Chen", "Rohan Patel", "Elena Brooks", "James Kim"];
 
 export const TASK_STATUS_STYLES = {
   onTrack: {
@@ -47,21 +50,33 @@ export const TASK_STATUS_STYLES = {
   },
 } as const;
 
+export const LEAVE_TASK_STYLE = {
+  label: "On leave",
+  badge: "bg-cyan-50 text-cyan-700",
+  bar: "bg-cyan-300",
+} as const;
+
 export function createEmptyTaskInput(): NewTaskInput {
   const today = new Date().toISOString().slice(0, 10);
 
   return {
     project: "",
-    projectManager: "",
+    requester: "",
     title: "",
     assignee: "",
     startDate: today,
     endDate: today,
     labels: [],
+    taskType: "task",
+    leaveReason: "",
   };
 }
 
 export function getTaskStatus(task: DevOpsTask) {
+  if (isLeaveTask(task)) {
+    return "onTrack";
+  }
+
   if (task.completed) {
     return "onTrack";
   }
@@ -84,16 +99,25 @@ export function getTaskStatus(task: DevOpsTask) {
 }
 
 export function normalizeTaskInput<T extends NewTaskInput | UpdateTaskInput>(task: T): T {
+  const normalizedTaskType = task.taskType === "leave" ? "leave" : "task";
+  const project = task.project.trim();
+  const requester = task.requester.trim();
+  const title = task.title.trim();
+  const leaveReason = (task.leaveReason ?? "").trim();
+
   return {
     ...task,
-    project: task.project.trim(),
-    projectManager: task.projectManager.trim(),
-    title: task.title.trim(),
+    project:
+      normalizedTaskType === "leave" ? project || "Team Availability" : project,
+    requester: normalizedTaskType === "leave" ? requester || "Resource Planner" : requester,
+    title: normalizedTaskType === "leave" ? title || "On leave" : title,
     assignee: task.assignee.trim(),
     labels: task.labels
       .map((label) => label.trim())
       .filter(Boolean)
       .filter((label, index, labels) => labels.indexOf(label) === index),
+    taskType: normalizedTaskType,
+    leaveReason,
   } as T;
 }
 
@@ -134,17 +158,31 @@ export function isTaskOnDate(task: DevOpsTask, date: string) {
   return day >= start && day <= end;
 }
 
+export function isLeaveTask(task: Pick<DevOpsTask, "taskType">) {
+  return (task.taskType ?? "task") === "leave";
+}
+
+export function getTaskPresentation(task: DevOpsTask) {
+  if (isLeaveTask(task)) {
+    return LEAVE_TASK_STYLE;
+  }
+
+  return TASK_STATUS_STYLES[getTaskStatus(task)];
+}
+
 export function toTask(record: TaskRecord): DevOpsTask {
   return {
     id: record.id,
     project: record.project,
-    projectManager: record.project_manager,
+    requester: record.requester,
     title: record.title,
     assignee: record.assignee,
     startDate: record.start_date,
     endDate: record.end_date,
     labels: record.labels ?? [],
     completed: record.completed ?? false,
+    taskType: record.task_type ?? "task",
+    leaveReason: record.leave_reason ?? "",
   };
 }
 
@@ -153,13 +191,15 @@ export function toTaskInsert(task: NewTaskInput) {
 
   return {
     project: normalized.project,
-    project_manager: normalized.projectManager,
+    requester: normalized.requester,
     title: normalized.title,
     assignee: normalized.assignee,
     start_date: normalized.startDate,
     end_date: normalized.endDate,
     labels: normalized.labels,
     completed: false,
+    task_type: normalized.taskType,
+    leave_reason: normalized.leaveReason || null,
   };
 }
 
@@ -168,13 +208,15 @@ export function toTaskUpdate(task: UpdateTaskInput) {
 
   return {
     project: normalized.project,
-    project_manager: normalized.projectManager,
+    requester: normalized.requester,
     title: normalized.title,
     assignee: normalized.assignee,
     start_date: normalized.startDate,
     end_date: normalized.endDate,
     labels: normalized.labels,
     completed: normalized.completed,
+    task_type: normalized.taskType,
+    leave_reason: normalized.leaveReason || null,
   };
 }
 
