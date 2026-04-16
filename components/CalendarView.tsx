@@ -147,40 +147,39 @@ export function CalendarView({
     };
 
     const handlePointerUp = () => {
-      setInteraction((current) => {
-        if (!current) {
-          return null;
-        }
+      const current = interaction;
+      if (!current) {
+        return;
+      }
 
-        if (!current.moved) {
-          if (current.mode === "move") {
-            onEditTask(current.task);
-          }
-          return null;
-        }
+      setInteraction(null);
 
-        if (
-          current.mode === "move" &&
-          (current.task.startDate !== current.originStartDate ||
-            current.task.assignee !== current.originAssignee)
-        ) {
-          void onMoveTask(current.task, current.task.assignee, current.task.startDate);
+      if (!current.moved) {
+        if (current.mode === "move") {
+          onEditTask(current.task);
         }
+        return;
+      }
 
-        if (current.mode === "resize" && current.edge === "start") {
-          if (current.task.startDate !== current.originStartDate) {
-            void onResizeTask(current.task, "start", current.task.startDate);
-          }
+      if (
+        current.mode === "move" &&
+        (current.task.startDate !== current.originStartDate ||
+          current.task.assignee !== current.originAssignee)
+      ) {
+        void onMoveTask(current.task, current.task.assignee, current.task.startDate);
+      }
+
+      if (current.mode === "resize" && current.edge === "start") {
+        if (current.task.startDate !== current.originStartDate) {
+          void onResizeTask(current.task, "start", current.task.startDate);
         }
+      }
 
-        if (current.mode === "resize" && current.edge === "end") {
-          if (current.task.endDate !== current.originEndDate) {
-            void onResizeTask(current.task, "end", current.task.endDate);
-          }
+      if (current.mode === "resize" && current.edge === "end") {
+        if (current.task.endDate !== current.originEndDate) {
+          void onResizeTask(current.task, "end", current.task.endDate);
         }
-
-        return null;
-      });
+      }
     };
 
     window.addEventListener("mousemove", handlePointerMove);
