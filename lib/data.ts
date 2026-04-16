@@ -4,7 +4,7 @@ export const initialTasks: DevOpsTask[] = [
   {
     id: 1,
     project: "Payments Core",
-    projectManager: "Nina Alvarez",
+    requester: "Nina Alvarez",
     title: "Roll out production Kubernetes node pool upgrade",
     assignee: "Maya Chen",
     startDate: "2026-04-13",
@@ -14,7 +14,7 @@ export const initialTasks: DevOpsTask[] = [
   {
     id: 2,
     project: "Developer Platform",
-    projectManager: "Owen Blake",
+    requester: "Owen Blake",
     title: "Configure GitHub Actions caching for monorepo builds",
     assignee: "Rohan Patel",
     startDate: "2026-04-14",
@@ -24,7 +24,7 @@ export const initialTasks: DevOpsTask[] = [
   {
     id: 3,
     project: "Customer Analytics",
-    projectManager: "Priya D'Souza",
+    requester: "Priya D'Souza",
     title: "Provision staging observability dashboards",
     assignee: "Elena Brooks",
     startDate: "2026-04-11",
@@ -34,7 +34,7 @@ export const initialTasks: DevOpsTask[] = [
   {
     id: 4,
     project: "Security Operations",
-    projectManager: "Liam Porter",
+    requester: "Liam Porter",
     title: "Rotate expiring vault secrets across shared services",
     assignee: "James Kim",
     startDate: "2026-04-16",
@@ -44,7 +44,7 @@ export const initialTasks: DevOpsTask[] = [
   {
     id: 5,
     project: "Mobile Backend",
-    projectManager: "Ava Singh",
+    requester: "Ava Singh",
     title: "Finalize blue-green deployment runbook for API cluster",
     assignee: "Maya Chen",
     startDate: "2026-04-18",
@@ -54,7 +54,7 @@ export const initialTasks: DevOpsTask[] = [
   {
     id: 6,
     project: "Retail Launch",
-    projectManager: "Marcus Lee",
+    requester: "Marcus Lee",
     title: "Backfill Terraform modules for regional edge services",
     assignee: "Rohan Patel",
     startDate: "2026-04-10",
@@ -64,7 +64,7 @@ export const initialTasks: DevOpsTask[] = [
   {
     id: 7,
     project: "Data Warehouse",
-    projectManager: "Sofia Grant",
+    requester: "Sofia Grant",
     title: "Tune Airflow worker autoscaling thresholds",
     assignee: "Elena Brooks",
     startDate: "2026-04-15",
@@ -74,11 +74,23 @@ export const initialTasks: DevOpsTask[] = [
   {
     id: 8,
     project: "Identity Stack",
-    projectManager: "Ethan Cole",
+    requester: "Ethan Cole",
     title: "Validate disaster recovery drill for SSO services",
     assignee: "James Kim",
     startDate: "2026-04-12",
     endDate: "2026-04-16",
     labels: ["dr", "sso", "compliance"],
+  },
+  {
+    id: 9,
+    project: "Team Availability",
+    requester: "Resource Planner",
+    title: "On leave",
+    assignee: "Elena Brooks",
+    startDate: "2026-04-18",
+    endDate: "2026-04-19",
+    labels: [],
+    taskType: "leave",
+    leaveReason: "Planned leave",
   },
 ];

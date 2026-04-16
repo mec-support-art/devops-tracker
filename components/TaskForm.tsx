@@ -2,18 +2,19 @@
 
 import { useState } from "react";
 
-import { type NewTaskInput } from "@/lib/tasks";
+import { type NewTaskInput, type UpdateTaskInput } from "@/lib/tasks";
 
 type TaskFormProps = {
   assigneeOptions: string[];
-  onSubmit: (task: NewTaskInput) => Promise<void>;
+  requesterOptions: string[];
+  onSubmit: (task: UpdateTaskInput) => Promise<void>;
 };
 
 const today = new Date().toISOString().slice(0, 10);
 
 const initialFormState: NewTaskInput = {
   project: "",
-  projectManager: "",
+  requester: "",
   title: "",
   assignee: "",
   startDate: today,
@@ -21,7 +22,7 @@ const initialFormState: NewTaskInput = {
   labels: [],
 };
 
-export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
+export function TaskForm({ assigneeOptions, requesterOptions, onSubmit }: TaskFormProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -57,7 +58,7 @@ export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!formData.project || !formData.projectManager || !formData.title || !formData.assignee) {
+    if (!formData.project || !formData.requester || !formData.title || !formData.assignee) {
       return;
     }
 
@@ -69,7 +70,7 @@ export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
     try {
       setIsSaving(true);
       setSubmitError(null);
-      await onSubmit(formData);
+      await onSubmit({ ...formData, completed: false });
       resetForm();
     } catch (error) {
       setSubmitError(
@@ -81,17 +82,17 @@ export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
   };
 
   return (
-    <div className="w-full max-w-xl rounded-[28px] border border-slate-200/80 bg-slate-950 p-1 shadow-card">
-      <div className="rounded-[24px] bg-slate-900 p-5 text-white">
+    <div className="w-full max-w-xl rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Create task</p>
-            <h2 className="mt-2 text-xl font-semibold">Add a new DevOps assignment</h2>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Create task</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">Add a new DevOps assignment</h2>
           </div>
           <button
             type="button"
             onClick={() => setIsOpen((current) => !current)}
-            className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
+            className="rounded-md border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
           >
             {isOpen ? "Hide form" : "New task"}
           </button>
@@ -109,14 +110,20 @@ export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
                   className={inputStyles}
                 />
               </Field>
-              <Field label="Project Manager">
-                <input
+              <Field label="Requester">
+                <select
                   required
-                  value={formData.projectManager}
-                  onChange={(event) => updateField("projectManager", event.target.value)}
-                  placeholder="Avery Stone"
+                  value={formData.requester}
+                  onChange={(event) => updateField("requester", event.target.value)}
                   className={inputStyles}
-                />
+                >
+                  <option value="">Select requester</option>
+                  {requesterOptions.map((requester) => (
+                    <option key={requester} value={requester}>
+                      {requester}
+                    </option>
+                  ))}
+                </select>
               </Field>
             </div>
 
@@ -184,7 +191,7 @@ export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
                   <button
                     type="button"
                     onClick={addLabel}
-                    className="rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
+                    className="rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
                   >
                     Add label
                   </button>
@@ -197,41 +204,41 @@ export function TaskForm({ assigneeOptions, onSubmit }: TaskFormProps) {
                         key={label}
                         type="button"
                         onClick={() => removeLabel(label)}
-                        className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-white/20"
+                        className="rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
                       >
                         {label} ×
                       </button>
                     ))
                   ) : (
-                    <p className="text-sm text-slate-400">No labels added yet.</p>
+                    <p className="text-sm text-slate-500">No labels added yet.</p>
                   )}
                 </div>
               </div>
             </Field>
 
-            <div className="flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:justify-end">
+            <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
               {submitError ? (
-                <p className="text-sm text-rose-300 sm:mr-auto">{submitError}</p>
+                <p className="text-sm text-rose-600 sm:mr-auto">{submitError}</p>
               ) : null}
               <button
                 type="button"
                 onClick={resetForm}
                 disabled={isSaving}
-                className="rounded-2xl border border-white/15 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/5"
+                className="rounded-md border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSaving}
-                className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
+                className="rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
               >
                 {isSaving ? "Saving..." : "Save task"}
               </button>
             </div>
           </form>
         ) : (
-          <p className="mt-5 text-sm leading-6 text-slate-300">
+          <p className="mt-5 text-sm leading-6 text-slate-500">
             Open the form to add a task instantly. New assignments appear in the board and
             timeline views right away.
           </p>
@@ -250,11 +257,11 @@ function Field({
 }) {
   return (
     <label className="space-y-2">
-      <span className="text-sm font-medium text-slate-200">{label}</span>
+      <span className="text-sm font-medium text-slate-700">{label}</span>
       {children}
     </label>
   );
 }
 
 const inputStyles =
-  "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-400 focus:border-white/30 focus:bg-white/10";
+  "w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400";

@@ -3,14 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  TASK_STATUS_STYLES,
   formatDateLabel,
-  getTaskStatus,
+  getTaskPresentation,
+  isLeaveTask,
+  isTaskOnDate,
   type DevOpsTask,
 } from "@/lib/tasks";
 
 type CalendarViewProps = {
+  assignees: string[];
   busyTaskIds?: number[];
+  onCreateLeave: (assignee: string, isoDate: string) => void;
+  onCreateTask: (assignee: string, isoDate: string) => void;
   onEditTask: (task: DevOpsTask) => void;
   onMoveTask: (task: DevOpsTask, nextAssignee: string, nextStartDate: string) => Promise<void>;
   onResizeTask: (
@@ -25,6 +29,7 @@ type CalendarDay = {
   iso: string;
   weekday: string;
   dayOfMonth: string;
+  isWeekend: boolean;
   monthLabel: string;
 };
 
@@ -44,17 +49,19 @@ const DAY_WIDTH = 120;
 const TRACK_HEIGHT = 58;
 const ROW_PADDING = 16;
 const CLICK_THRESHOLD = 6;
+const SIDEBAR_CARD_MIN_HEIGHT = 156;
 
 export function CalendarView({
+  assignees,
   busyTaskIds = [],
+  onCreateLeave,
+  onCreateTask,
   onEditTask,
   onMoveTask,
   onResizeTask,
   tasks,
 }: CalendarViewProps) {
-  const assignees = Array.from(new Set(tasks.map((task) => task.assignee))).sort((a, b) =>
-    a.localeCompare(b),
-  );
+  const todayIso = getTodayIso();
 
   const calendarDays = useMemo(() => getCalendarDays(tasks), [tasks]);
   const rowModels = useMemo(
@@ -62,18 +69,30 @@ export function CalendarView({
       assignees.map((assignee) => {
         const assigneeTasks = tasks.filter((task) => task.assignee === assignee);
         const tracks = buildTracks(assigneeTasks, calendarDays);
+        const scheduledTaskCount = assigneeTasks.filter((task) => !isLeaveTask(task)).length;
+        const leaveCount = assigneeTasks.filter((task) => isLeaveTask(task)).length;
+        const isAwayToday = assigneeTasks.some(
+          (task) => isLeaveTask(task) && isTaskOnDate(task, todayIso),
+        );
+        const timelineRowHeight = Math.max(1, tracks.length) * TRACK_HEIGHT + ROW_PADDING * 2;
 
         return {
           assignee,
           tasks: assigneeTasks,
           tracks,
-          rowHeight: Math.max(1, tracks.length) * TRACK_HEIGHT + ROW_PADDING * 2,
+          isAwayToday,
+          leaveCount,
+          scheduledTaskCount,
+          rowHeight: Math.max(timelineRowHeight, SIDEBAR_CARD_MIN_HEIGHT),
         };
       }),
-    [assignees, calendarDays, tasks],
+    [assignees, calendarDays, tasks, todayIso],
   );
 
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const headerScrollRef = useRef<HTMLDivElement | null>(null);
+  const bodyScrollRef = useRef<HTMLDivElement | null>(null);
+  const syncingScrollRef = useRef<"header" | "body" | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
   const activeDayIndex = useMemo(() => {
     if (!interaction) {
@@ -191,8 +210,27 @@ export function CalendarView({
     };
   }, [interaction, onEditTask, onMoveTask, onResizeTask]);
 
+  const syncHorizontalScroll = (source: "header" | "body") => {
+    if (syncingScrollRef.current && syncingScrollRef.current !== source) {
+      return;
+    }
+
+    syncingScrollRef.current = source;
+
+    const sourceNode = source === "header" ? headerScrollRef.current : bodyScrollRef.current;
+    const targetNode = source === "header" ? bodyScrollRef.current : headerScrollRef.current;
+
+    if (sourceNode && targetNode) {
+      targetNode.scrollLeft = sourceNode.scrollLeft;
+    }
+
+    window.requestAnimationFrame(() => {
+      syncingScrollRef.current = null;
+    });
+  };
+
   return (
-    <section className="rounded-[28px] border border-white/70 bg-white/80 p-4 shadow-panel backdrop-blur sm:p-5">
+    <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-4">
       <div className="flex flex-col gap-2 border-b border-slate-200/80 pb-4">
         <h2 className="text-xl font-semibold text-slate-900">Scrollable resource calendar</h2>
         <p className="text-sm text-slate-500">
@@ -203,7 +241,7 @@ export function CalendarView({
 
       <div className="mt-5 flex gap-4">
         <div className="w-[250px] shrink-0 space-y-3">
-          <div className="rounded-2xl border border-slate-200/80 bg-white px-5 py-4 shadow-sm">
+          <div className="rounded-lg border border-slate-200/80 bg-slate-50 px-4 py-4 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
               DevOps resource
             </p>
@@ -214,95 +252,170 @@ export function CalendarView({
             rowModels.map((row) => (
               <div
                 key={row.assignee}
-                className="rounded-[24px] border border-slate-200/80 bg-white px-5 py-4 shadow-sm"
+                className={`flex flex-col justify-between rounded-xl border px-4 py-4 shadow-sm ${
+                  row.isAwayToday
+                    ? "border-rose-200 bg-rose-50"
+                    : "border-slate-200/80 bg-white"
+                }`}
                 style={{ height: row.rowHeight }}
               >
-                <p className="text-lg font-semibold text-slate-900">{row.assignee}</p>
-                <p className="mt-2 text-sm text-slate-500">
-                  {row.tasks.length} {row.tasks.length === 1 ? "task" : "tasks"} scheduled
-                </p>
+                <div>
+                  <p className="text-lg font-semibold text-slate-900">{row.assignee}</p>
+                  <p className={`mt-2 text-sm ${row.isAwayToday ? "text-rose-700" : "text-slate-500"}`}>
+                    {row.isAwayToday
+                      ? "Absent today"
+                      : `${row.scheduledTaskCount} ${
+                          row.scheduledTaskCount === 1 ? "task" : "tasks"
+                        } scheduled`}
+                  </p>
+                  {row.leaveCount > 0 ? (
+                    <p
+                      className={`mt-1 text-xs font-medium uppercase tracking-[0.16em] ${
+                        row.isAwayToday ? "text-rose-700" : "text-cyan-700"
+                      }`}
+                    >
+                      {row.leaveCount} leave {row.leaveCount === 1 ? "entry" : "entries"}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onCreateTask(row.assignee, todayIso)}
+                    className="rounded-md bg-slate-900 px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-700"
+                  >
+                    Add task
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onCreateLeave(row.assignee, todayIso)}
+                    className={`rounded-md border px-3 py-2.5 text-xs font-semibold transition ${
+                      row.isAwayToday
+                        ? "border-rose-200 bg-white text-rose-700 hover:bg-rose-100"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    Mark leave
+                  </button>
+                </div>
               </div>
             ))
           ) : (
-            <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
               No tasks match the current filters.
             </div>
           )}
         </div>
 
-        <div className="min-w-0 flex-1 overflow-x-auto">
-          <div className="min-w-max" style={{ width: calendarDays.length * DAY_WIDTH }}>
-            <div
-              className="grid overflow-hidden rounded-2xl border border-slate-200/80 bg-slate-100"
-              style={{ gridTemplateColumns: `repeat(${calendarDays.length}, ${DAY_WIDTH}px)` }}
-            >
-              {calendarDays.map((day) => (
-                <div
-                  key={day.iso}
-                  className={`border-r border-white/70 px-3 py-4 text-center last:border-r-0 ${
-                    activeDayIndex !== null && calendarDays[activeDayIndex]?.iso === day.iso
-                      ? "bg-sky-100"
-                      : ""
-                  }`}
-                >
-                  <p className="text-sm font-semibold text-slate-700">{day.weekday}</p>
-                  <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-                    {day.dayOfMonth}
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-slate-500">{day.monthLabel}</p>
-                </div>
-              ))}
+        <div className="min-w-0 flex-1">
+          <div
+            ref={headerScrollRef}
+            onScroll={() => syncHorizontalScroll("header")}
+            className="sticky top-0 z-30 overflow-x-auto overflow-y-visible"
+          >
+            <div className="min-w-max" style={{ width: calendarDays.length * DAY_WIDTH }}>
+              <div
+                className="grid overflow-hidden rounded-lg border border-slate-200/80 bg-slate-100 shadow-sm"
+                style={{ gridTemplateColumns: `repeat(${calendarDays.length}, ${DAY_WIDTH}px)` }}
+              >
+                {calendarDays.map((day) => (
+                  <div
+                    key={day.iso}
+                    className={`border-r px-3 py-4 text-center last:border-r-0 ${
+                      day.isWeekend
+                        ? "border-rose-100 bg-rose-50/95"
+                        : "border-white/70 bg-slate-100/95"
+                    } ${
+                      activeDayIndex !== null && calendarDays[activeDayIndex]?.iso === day.iso
+                        ? "bg-sky-100"
+                        : ""
+                    }`}
+                  >
+                    <p
+                      className={`text-sm font-semibold ${
+                        day.isWeekend ? "text-rose-700" : "text-slate-700"
+                      }`}
+                    >
+                      {day.weekday}
+                    </p>
+                    <p
+                      className={`mt-2 text-3xl font-semibold tracking-tight ${
+                        day.isWeekend ? "text-rose-900" : "text-slate-900"
+                      }`}
+                    >
+                      {day.dayOfMonth}
+                    </p>
+                    <p
+                      className={`mt-1 text-sm font-medium ${
+                        day.isWeekend ? "text-rose-600" : "text-slate-500"
+                      }`}
+                    >
+                      {day.monthLabel}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
+          </div>
 
-            <div className="mt-3 space-y-3">
-              {rowModels.map((row) => (
-                <TimelineRow
-                  key={row.assignee}
-                  assignee={row.assignee}
-                  busyTaskIds={busyTaskIds}
-                  calendarDays={calendarDays}
-                  interaction={interaction}
-                  isActiveRow={interaction?.currentAssignee === row.assignee}
-                  onBarPointerDown={(task, clientX) =>
-                    setInteraction({
-                      currentAssignee: task.assignee,
-                      mode: "move",
-                      moved: false,
-                      originAssignee: task.assignee,
-                      originClientX: clientX,
-                      originEndDate: task.endDate,
-                      originStartDate: task.startDate,
-                      task,
-                    })
-                  }
-                  onHandlePointerDown={(task, edge, clientX) =>
-                    setInteraction({
-                      currentAssignee: task.assignee,
-                      edge,
-                      mode: "resize",
-                      moved: false,
-                      originAssignee: task.assignee,
-                      originClientX: clientX,
-                      originEndDate: task.endDate,
-                      originStartDate: task.startDate,
-                      task,
-                    })
-                  }
-                  registerRowRef={(node) => {
-                    rowRefs.current[row.assignee] = node;
-                  }}
-                  rowHeight={row.rowHeight}
-                  tasks={row.tasks}
-                  tracks={row.tracks}
-                />
-              ))}
+          <div
+            ref={bodyScrollRef}
+            onScroll={() => syncHorizontalScroll("body")}
+            className="mt-3 overflow-x-auto"
+          >
+            <div className="min-w-max" style={{ width: calendarDays.length * DAY_WIDTH }}>
+              <div className="space-y-3">
+                {rowModels.map((row) => (
+                  <TimelineRow
+                    key={row.assignee}
+                    assignee={row.assignee}
+                    busyTaskIds={busyTaskIds}
+                    calendarDays={calendarDays}
+                    interaction={interaction}
+                    isActiveRow={interaction?.currentAssignee === row.assignee}
+                    onCreateLeave={onCreateLeave}
+                    onCreateTask={onCreateTask}
+                    onBarPointerDown={(task, clientX) =>
+                      setInteraction({
+                        currentAssignee: task.assignee,
+                        mode: "move",
+                        moved: false,
+                        originAssignee: task.assignee,
+                        originClientX: clientX,
+                        originEndDate: task.endDate,
+                        originStartDate: task.startDate,
+                        task,
+                      })
+                    }
+                    onHandlePointerDown={(task, edge, clientX) =>
+                      setInteraction({
+                        currentAssignee: task.assignee,
+                        edge,
+                        mode: "resize",
+                        moved: false,
+                        originAssignee: task.assignee,
+                        originClientX: clientX,
+                        originEndDate: task.endDate,
+                        originStartDate: task.startDate,
+                        task,
+                      })
+                    }
+                    registerRowRef={(node) => {
+                      rowRefs.current[row.assignee] = node;
+                    }}
+                    rowHeight={row.rowHeight}
+                    tasks={row.tasks}
+                    tracks={row.tracks}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </div>
       </div>
       {interaction && activeDayIndex !== null ? (
         <div className="mt-4 flex items-center justify-end">
-          <div className="rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">
+          <div className="rounded-md border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">
             {interaction.mode === "move"
               ? `Move to ${interaction.currentAssignee} • ${formatDateLabel(interaction.task.startDate)}`
               : `${
@@ -325,6 +438,8 @@ function TimelineRow({
   calendarDays,
   interaction,
   isActiveRow,
+  onCreateLeave,
+  onCreateTask,
   onBarPointerDown,
   onHandlePointerDown,
   registerRowRef,
@@ -337,6 +452,8 @@ function TimelineRow({
   calendarDays: CalendarDay[];
   interaction: InteractionState | null;
   isActiveRow: boolean;
+  onCreateLeave: (assignee: string, isoDate: string) => void;
+  onCreateTask: (assignee: string, isoDate: string) => void;
   onBarPointerDown: (task: DevOpsTask, clientX: number) => void;
   onHandlePointerDown: (task: DevOpsTask, edge: "start" | "end", clientX: number) => void;
   registerRowRef: (node: HTMLDivElement | null) => void;
@@ -347,7 +464,7 @@ function TimelineRow({
   return (
     <div
       ref={registerRowRef}
-      className={`relative overflow-hidden rounded-[24px] border bg-white ${
+      className={`relative overflow-hidden rounded-xl border bg-white ${
         isActiveRow ? "border-sky-300 shadow-[0_0_0_1px_rgba(14,165,233,0.18)]" : "border-slate-200/80"
       }`}
       style={{ height: rowHeight }}
@@ -359,7 +476,11 @@ function TimelineRow({
         {calendarDays.map((day, index) => (
           <div
             key={`${assignee}-${day.iso}`}
-            className={`border-r border-slate-100 last:border-r-0 ${
+            className={`group relative border-r last:border-r-0 ${
+              day.isWeekend
+                ? "border-rose-100 bg-rose-50/60"
+                : "border-slate-100"
+            } ${
               interaction &&
               calendarDays[index] &&
               ((interaction.mode === "move" && interaction.task.startDate === day.iso) ||
@@ -371,8 +492,27 @@ function TimelineRow({
                   interaction.task.endDate === day.iso))
                 ? "bg-sky-50"
                 : ""
-            }`}
-          />
+            } transition hover:bg-slate-50/80`}
+          >
+            <div className="absolute inset-0 opacity-0 transition group-hover:opacity-100">
+              <div className="flex h-full items-center justify-center gap-2 px-2">
+                <button
+                  type="button"
+                  onClick={() => onCreateTask(assignee, day.iso)}
+                  className="rounded-md bg-slate-900 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white"
+                >
+                  Task
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCreateLeave(assignee, day.iso)}
+                  className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-700"
+                >
+                  Leave
+                </button>
+              </div>
+            </div>
+          </div>
         ))}
       </div>
 
@@ -485,13 +625,13 @@ function TaskBar({
   width: number;
   x: number;
 }) {
-  const status = getTaskStatus(task);
-  const statusStyle = TASK_STATUS_STYLES[status];
+  const taskStyle = getTaskPresentation(task);
+  const isLeave = isLeaveTask(task);
 
   return (
     <div
-      className={`absolute flex items-center rounded-2xl border border-white/60 px-4 py-3 text-left shadow-sm transition ${
-        statusStyle.badge
+      className={`absolute flex items-center rounded-lg border border-white/60 px-4 py-3 text-left shadow-sm transition ${
+        taskStyle.badge
       } ${busy ? "cursor-not-allowed opacity-60" : "cursor-grab hover:-translate-y-0.5 active:cursor-grabbing"} ${
         dimmed ? "opacity-35" : ""
       }`}
@@ -522,10 +662,12 @@ function TaskBar({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{task.title}</p>
-            <p className="mt-1 truncate text-[11px] opacity-80">{task.project}</p>
+            <p className="mt-1 truncate text-[11px] opacity-80">
+              {isLeave && task.leaveReason ? task.leaveReason : task.project}
+            </p>
           </div>
-          <span className="shrink-0 rounded-full bg-white/75 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-700">
-            {statusStyle.label}
+          <span className="shrink-0 rounded-md bg-white/75 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+            {taskStyle.label}
           </span>
         </div>
       </button>
@@ -560,7 +702,7 @@ function ResizeHandle({
         event.stopPropagation();
         onPointerDown(task, edge, event.clientX);
       }}
-      className={`flex h-full w-3 shrink-0 items-center justify-center rounded-full ${
+      className={`flex h-full w-3 shrink-0 items-center justify-center rounded-md ${
         busy ? "cursor-not-allowed opacity-50" : "cursor-ew-resize hover:bg-white/60"
       }`}
       title={edge === "start" ? "Drag to change start date" : "Drag to change end date"}
@@ -584,12 +726,11 @@ function PreviewBar({
     return null;
   }
 
-  const status = getTaskStatus(task);
-  const statusStyle = TASK_STATUS_STYLES[status];
+  const taskStyle = getTaskPresentation(task);
 
   return (
     <div
-      className={`pointer-events-none absolute rounded-2xl border border-dashed border-slate-400/50 px-4 py-3 opacity-25 ${statusStyle.badge}`}
+      className={`pointer-events-none absolute rounded-lg border border-dashed border-slate-400/50 px-4 py-3 opacity-25 ${taskStyle.badge}`}
       style={{
         left: startIndex * DAY_WIDTH,
         top: ROW_PADDING,
@@ -650,6 +791,7 @@ function buildCalendarDays(start: Date, end: Date) {
       iso: toIsoDate(cursor),
       weekday: cursor.toLocaleDateString("en-US", { weekday: "short" }),
       dayOfMonth: cursor.toLocaleDateString("en-US", { day: "numeric" }),
+      isWeekend: cursor.getDay() === 0 || cursor.getDay() === 6,
       monthLabel: cursor.toLocaleDateString("en-US", { month: "short" }),
     });
 
@@ -726,4 +868,8 @@ function toIsoDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function getTodayIso() {
+  return toIsoDate(new Date());
 }

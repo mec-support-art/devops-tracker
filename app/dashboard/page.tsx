@@ -1,23 +1,33 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import { AssigneeColumn } from "@/components/AssigneeColumn";
 import { CalendarView } from "@/components/CalendarView";
 import { TaskEditModal } from "@/components/TaskEditModal";
 import { TaskForm } from "@/components/TaskForm";
+import { initialDevOpsResources, initialRequesters, type Person } from "@/lib/people";
 import {
   TASK_STATUS_STYLES,
-  assigneeOptions,
   getTaskStatus,
+  isLeaveTask,
   type TaskStatus,
   type DevOpsTask,
-  type NewTaskInput,
   type UpdateTaskInput,
 } from "@/lib/tasks";
 
+type EditorState = {
+  mode: "create" | "edit";
+  initialTask: Partial<UpdateTaskInput>;
+  taskId?: number;
+};
+
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<DevOpsTask[]>([]);
+  const [devopsResources, setDevopsResources] = useState<Person[]>(initialDevOpsResources);
+  const [requesters, setRequesters] = useState<Person[]>(initialRequesters);
+  const [dataSource, setDataSource] = useState<"supabase" | "local-fallback">("local-fallback");
   const [activeView, setActiveView] = useState<"board" | "timeline">("board");
   const [selectedProject, setSelectedProject] = useState("All projects");
   const [selectedAssignee, setSelectedAssignee] = useState("All assignees");
@@ -27,35 +37,69 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [editingTask, setEditingTask] = useState<DevOpsTask | null>(null);
+  const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [busyTaskIds, setBusyTaskIds] = useState<number[]>([]);
+
+  const assigneeOptions = useMemo(() => {
+    return Array.from(
+      new Set([...devopsResources.map((resource) => resource.name), ...tasks.map((task) => task.assignee)]),
+    ).sort((a, b) => a.localeCompare(b));
+  }, [devopsResources, tasks]);
+  const requesterOptions = useMemo(() => {
+    return Array.from(
+      new Set([...requesters.map((requester) => requester.name), ...tasks.map((task) => task.requester)]),
+    ).sort((a, b) => a.localeCompare(b));
+  }, [requesters, tasks]);
 
   useEffect(() => {
     let ignore = false;
 
-    async function loadTasks() {
+    async function loadDashboardData() {
       try {
         setIsLoading(true);
         setErrorMessage(null);
 
-        const response = await fetch("/api/tasks", { cache: "no-store" });
-        const payload = (await response.json()) as {
+        const [tasksResponse, resourcesResponse, requestersResponse] = await Promise.all([
+          fetch("/api/tasks", { cache: "no-store" }),
+          fetch("/api/devops-resources", { cache: "no-store" }),
+          fetch("/api/requesters", { cache: "no-store" }),
+        ]);
+
+        const tasksPayload = (await tasksResponse.json()) as {
           tasks?: DevOpsTask[];
+          error?: string;
+          source?: "supabase" | "local-fallback";
+        };
+        const resourcesPayload = (await resourcesResponse.json()) as {
+          people?: Person[];
+          error?: string;
+        };
+        const requestersPayload = (await requestersResponse.json()) as {
+          people?: Person[];
           error?: string;
         };
 
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Unable to load tasks.");
+        if (!tasksResponse.ok) {
+          throw new Error(tasksPayload.error ?? "Unable to load tasks.");
+        }
+
+        if (!resourcesResponse.ok) {
+          throw new Error(resourcesPayload.error ?? "Unable to load DevOps resources.");
+        }
+
+        if (!requestersResponse.ok) {
+          throw new Error(requestersPayload.error ?? "Unable to load requesters.");
         }
 
         if (!ignore) {
-          setTasks(payload.tasks ?? []);
+          setTasks(tasksPayload.tasks ?? []);
+          setDevopsResources(resourcesPayload.people ?? []);
+          setRequesters(requestersPayload.people ?? []);
+          setDataSource(tasksPayload.source ?? "local-fallback");
         }
       } catch (error) {
         if (!ignore) {
-          setErrorMessage(
-            error instanceof Error ? error.message : "Unable to load tasks.",
-          );
+          setErrorMessage(error instanceof Error ? error.message : "Unable to load dashboard.");
         }
       } finally {
         if (!ignore) {
@@ -64,7 +108,7 @@ export default function DashboardPage() {
       }
     }
 
-    void loadTasks();
+    void loadDashboardData();
 
     return () => {
       ignore = true;
@@ -89,8 +133,9 @@ export default function DashboardPage() {
         [
           task.title,
           task.project,
-          task.projectManager,
+          task.requester,
           task.assignee,
+          task.leaveReason ?? "",
           ...task.labels,
         ]
           .join(" ")
@@ -108,10 +153,10 @@ export default function DashboardPage() {
         .filter((task) => task.assignee === assignee)
         .sort((a, b) => a.startDate.localeCompare(b.startDate)),
     }));
-  }, [filteredTasks]);
+  }, [assigneeOptions, filteredTasks]);
 
   const stats = useMemo(() => {
-    return filteredTasks.reduce(
+    return filteredTasks.filter((task) => !isLeaveTask(task)).reduce(
       (acc, task) => {
         const status = getTaskStatus(task);
         acc.total += 1;
@@ -122,27 +167,30 @@ export default function DashboardPage() {
     );
   }, [filteredTasks]);
 
-  const handleCreateTask = async (newTask: NewTaskInput) => {
+  const handleCreateTask = async (newTask: UpdateTaskInput) => {
     setErrorMessage(null);
 
+    const { completed: _completed, ...payloadToCreate } = newTask;
     const response = await fetch("/api/tasks", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(newTask),
+      body: JSON.stringify(payloadToCreate),
     });
 
     const payload = (await response.json()) as {
       task?: DevOpsTask;
       error?: string;
+      source?: "supabase" | "local-fallback";
     };
 
     if (!response.ok || !payload.task) {
       throw new Error(payload.error ?? "Unable to create task.");
     }
 
-    setTasks((currentTasks) => [payload.task as DevOpsTask, ...currentTasks]);
+    setTasks((currentTasks) => [payload.task!, ...currentTasks]);
+    setDataSource(payload.source ?? dataSource);
   };
 
   const updateBusyState = (taskId: number, active: boolean) => {
@@ -156,6 +204,15 @@ export default function DashboardPage() {
     updateBusyState(taskId, true);
 
     try {
+      if (dataSource === "local-fallback") {
+        setTasks((currentTasks) =>
+          currentTasks.map((task) =>
+            task.id === taskId ? { ...task, ...updatedTask } : task,
+          ),
+        );
+        return;
+      }
+
       const response = await fetch(`/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: {
@@ -184,13 +241,15 @@ export default function DashboardPage() {
   const handleToggleCompleted = async (task: DevOpsTask) => {
     await handleUpdateTask(task.id, {
       project: task.project,
-      projectManager: task.projectManager,
+      requester: task.requester,
       title: task.title,
       assignee: task.assignee,
       startDate: task.startDate,
       endDate: task.endDate,
       labels: task.labels,
       completed: !(task.completed ?? false),
+      taskType: task.taskType ?? "task",
+      leaveReason: task.leaveReason ?? "",
     });
   };
 
@@ -204,6 +263,14 @@ export default function DashboardPage() {
     updateBusyState(task.id, true);
 
     try {
+      if (dataSource === "local-fallback") {
+        setTasks((currentTasks) => currentTasks.filter((item) => item.id !== task.id));
+        if (editorState?.taskId === task.id) {
+          setEditorState(null);
+        }
+        return;
+      }
+
       const response = await fetch(`/api/tasks/${task.id}`, {
         method: "DELETE",
       });
@@ -214,8 +281,8 @@ export default function DashboardPage() {
       }
 
       setTasks((currentTasks) => currentTasks.filter((item) => item.id !== task.id));
-      if (editingTask?.id === task.id) {
-        setEditingTask(null);
+      if (editorState?.taskId === task.id) {
+        setEditorState(null);
       }
     } finally {
       updateBusyState(task.id, false);
@@ -232,13 +299,15 @@ export default function DashboardPage() {
 
     await handleUpdateTask(task.id, {
       project: task.project,
-      projectManager: task.projectManager,
+      requester: task.requester,
       title: task.title,
       assignee: nextAssignee,
       startDate: nextStartDate,
       endDate: nextEndDate,
       labels: task.labels,
       completed: task.completed ?? false,
+      taskType: task.taskType ?? "task",
+      leaveReason: task.leaveReason ?? "",
     });
   };
 
@@ -257,24 +326,48 @@ export default function DashboardPage() {
 
     await handleUpdateTask(task.id, {
       project: task.project,
-      projectManager: task.projectManager,
+      requester: task.requester,
       title: task.title,
       assignee: task.assignee,
       startDate: edge === "start" ? nextDate : task.startDate,
       endDate: edge === "end" ? nextDate : task.endDate,
       labels: task.labels,
       completed: task.completed ?? false,
+      taskType: task.taskType ?? "task",
+      leaveReason: task.leaveReason ?? "",
+    });
+  };
+
+  const openCreateEditor = (
+    assignee: string,
+    isoDate: string,
+    taskType: "task" | "leave" = "task",
+  ) => {
+    setEditorState({
+      mode: "create",
+      initialTask: {
+        assignee,
+        startDate: isoDate,
+        endDate: isoDate,
+        completed: false,
+        taskType,
+        title: taskType === "leave" ? "On leave" : "",
+        project: taskType === "leave" ? "Team Availability" : "",
+        requester: taskType === "leave" ? "Resource Planner" : "",
+        leaveReason: "",
+        labels: [],
+      },
     });
   };
 
   return (
-    <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-10">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <section className="overflow-hidden rounded-[32px] border border-white/70 bg-white/80 p-6 shadow-panel backdrop-blur xl:p-8">
+    <main className="min-h-screen px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-7xl flex-col gap-4">
+        <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm xl:p-7">
           <div className="bg-grid bg-[size:20px_20px]">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.95fr)]">
               <div className="max-w-2xl space-y-4">
-                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                   DevOps Resource Planner
                 </span>
                 <div className="space-y-3">
@@ -282,8 +375,8 @@ export default function DashboardPage() {
                     Track every DevOps task across projects in one calm, visual workspace.
                   </h1>
                   <p className="max-w-xl text-sm leading-6 text-slate-600 sm:text-base">
-                    See who owns what, where delivery is healthy, and which timelines
-                    need attention this week.
+                    See who owns what, who requested it, and which timelines need
+                    attention this week.
                   </p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -306,20 +399,63 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <TaskForm onSubmit={handleCreateTask} assigneeOptions={assigneeOptions} />
+              <div className="flex flex-col gap-5">
+                <TaskForm
+                  assigneeOptions={assigneeOptions}
+                  onSubmit={handleCreateTask}
+                  requesterOptions={requesterOptions}
+                />
+                <Link
+                  href="/dashboard/people"
+                  className="group rounded-2xl border border-slate-200 bg-[linear-gradient(135deg,#f8fafc_0%,#eef2ff_100%)] p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        People settings
+                      </p>
+                      <div className="space-y-2">
+                        <h2 className="text-2xl font-semibold text-slate-900">
+                          Manage resources and requesters
+                        </h2>
+                        <p className="max-w-md text-sm leading-6 text-slate-600">
+                          Open the dedicated settings page to add, rename, or remove the people
+                          used across swimlanes and task forms.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition group-hover:border-slate-300">
+                      Open
+                    </span>
+                  </div>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <PeopleSummaryCard
+                      count={devopsResources.length}
+                      label="DevOps resources"
+                      tone="bg-emerald-50 text-emerald-700"
+                    />
+                    <PeopleSummaryCard
+                      count={requesters.length}
+                      label="Requesters"
+                      tone="bg-sky-50 text-sky-700"
+                    />
+                  </div>
+                </Link>
+              </div>
             </div>
           </div>
         </section>
 
         {errorMessage ? (
-          <section className="rounded-[24px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
+          <section className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
             {errorMessage}
           </section>
         ) : null}
 
-        <section className="rounded-[28px] border border-white/70 bg-white/80 p-4 shadow-panel backdrop-blur sm:p-5">
+        <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="inline-flex w-fit rounded-2xl bg-slate-100 p-1">
+            <div className="inline-flex w-fit rounded-lg border border-slate-200 bg-slate-50 p-1">
               <ViewButton
                 active={activeView === "board"}
                 label="Swimlane view"
@@ -336,13 +472,13 @@ export default function DashboardPage() {
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search task, project, manager, assignee, or label"
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 sm:min-w-80"
+                placeholder="Search task, project, requester, assignee, or label"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400 sm:min-w-80"
               />
               <select
                 value={selectedProject}
                 onChange={(event) => setSelectedProject(event.target.value)}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400"
               >
                 {projectOptions.map((project) => (
                   <option key={project}>{project}</option>
@@ -352,7 +488,7 @@ export default function DashboardPage() {
               <select
                 value={selectedAssignee}
                 onChange={(event) => setSelectedAssignee(event.target.value)}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400"
               >
                 <option>All assignees</option>
                 {assigneeOptions.map((assignee) => (
@@ -364,7 +500,7 @@ export default function DashboardPage() {
                 onChange={(event) =>
                   setSelectedStatus(event.target.value as "All statuses" | TaskStatus)
                 }
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400"
               >
                 <option>All statuses</option>
                 <option value="onTrack">On track</option>
@@ -376,7 +512,7 @@ export default function DashboardPage() {
         </section>
 
         {isLoading ? (
-          <section className="rounded-[28px] border border-white/70 bg-white/80 p-8 text-sm text-slate-500 shadow-panel backdrop-blur">
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-6 text-sm text-slate-500 shadow-sm">
             Loading tasks...
           </section>
         ) : activeView === "board" ? (
@@ -386,8 +522,23 @@ export default function DashboardPage() {
                 key={assignee}
                 assignee={assignee}
                 busyTaskIds={busyTaskIds}
+                onCreateLeave={() =>
+                  openCreateEditor(assignee, new Date().toISOString().slice(0, 10), "leave")
+                }
+                onCreateTask={() =>
+                  openCreateEditor(assignee, new Date().toISOString().slice(0, 10), "task")
+                }
                 onDelete={handleDeleteTask}
-                onEdit={setEditingTask}
+                onEdit={(task) =>
+                  setEditorState({
+                    mode: "edit",
+                    taskId: task.id,
+                    initialTask: {
+                      ...task,
+                      completed: task.completed ?? false,
+                    },
+                  })
+                }
                 onToggleCompleted={handleToggleCompleted}
                 tasks={assigneeTasks}
               />
@@ -395,21 +546,59 @@ export default function DashboardPage() {
           </section>
         ) : (
           <CalendarView
+            assignees={assigneeOptions}
             busyTaskIds={busyTaskIds}
-            onEditTask={setEditingTask}
+            onCreateLeave={(assignee, isoDate) => openCreateEditor(assignee, isoDate, "leave")}
+            onCreateTask={(assignee, isoDate) => openCreateEditor(assignee, isoDate, "task")}
+            onEditTask={(task) =>
+              setEditorState({
+                mode: "edit",
+                taskId: task.id,
+                initialTask: {
+                  ...task,
+                  completed: task.completed ?? false,
+                },
+              })
+            }
             onMoveTask={handleMoveTask}
             onResizeTask={handleResizeTask}
             tasks={filteredTasks}
           />
         )}
       </div>
-      {editingTask ? (
+      {editorState ? (
         <TaskEditModal
-          onClose={() => setEditingTask(null)}
-          onSubmit={async (updatedTask) => {
-            await handleUpdateTask(editingTask.id, updatedTask);
+          assigneeOptions={assigneeOptions}
+          initialTask={editorState.initialTask}
+          mode={editorState.mode}
+          onClose={() => setEditorState(null)}
+          onDelete={
+            editorState.mode === "edit" && editorState.taskId
+              ? async () => {
+                  const existingTask = tasks.find((task) => task.id === editorState.taskId);
+                  if (!existingTask) {
+                    throw new Error("Entry not found.");
+                  }
+
+                  await handleDeleteTask(existingTask);
+                }
+              : undefined
+          }
+          onSubmit={async (taskDraft) => {
+            if (editorState.mode === "create") {
+              await handleCreateTask(taskDraft);
+              setEditorState(null);
+              return;
+            }
+
+            if (!editorState.taskId) {
+              throw new Error("Missing task id for update.");
+            }
+
+            await handleUpdateTask(editorState.taskId, taskDraft);
+            setEditorState(null);
           }}
-          task={editingTask}
+          requesterOptions={requesterOptions}
         />
       ) : null}
     </main>
@@ -446,19 +635,39 @@ function DashboardStat({
   const isBadgeTone = tone.startsWith("bg-");
 
   return (
-    <div className="rounded-3xl border border-slate-200/80 bg-white/85 p-4 shadow-sm">
+    <div className="rounded-xl border border-slate-200/80 bg-slate-50 p-4 shadow-sm">
       <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
       <div className="mt-3 flex items-center gap-3">
         <span className="text-3xl font-semibold text-slate-900">{value}</span>
         <span
           className={
             isBadgeTone
-              ? `rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`
-              : "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600"
+              ? `rounded-md px-2 py-1 text-[11px] font-semibold ${tone}`
+              : "rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600"
           }
         >
           Live
         </span>
+      </div>
+    </div>
+  );
+}
+
+function PeopleSummaryCard({
+  count,
+  label,
+  tone,
+}: {
+  count: number;
+  label: string;
+  tone: string;
+}) {
+  return (
+    <div className="rounded-xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
+      <div className="mt-3 flex items-center gap-3">
+        <span className="text-3xl font-semibold text-slate-900">{count}</span>
+        <span className={`rounded-md px-2 py-1 text-[11px] font-semibold ${tone}`}>Active</span>
       </div>
     </div>
   );
@@ -477,7 +686,7 @@ function ViewButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-[14px] px-4 py-2 text-sm font-medium transition ${
+      className={`rounded-md px-4 py-2 text-sm font-medium transition ${
         active
           ? "bg-slate-900 text-white shadow-sm"
           : "text-slate-600 hover:bg-white hover:text-slate-900"
