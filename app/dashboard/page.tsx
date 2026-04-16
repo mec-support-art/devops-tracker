@@ -519,9 +519,9 @@ export default function DashboardPage() {
           <section className="grid gap-4 xl:grid-cols-4">
             {groupedTasks.map(({ assignee, tasks: assigneeTasks }) => (
               <AssigneeColumn
-                key={assignee}
                 assignee={assignee}
                 busyTaskIds={busyTaskIds}
+                key={assignee}
                 onCreateLeave={() =>
                   openCreateEditor(assignee, new Date().toISOString().slice(0, 10), "leave")
                 }
@@ -529,13 +529,21 @@ export default function DashboardPage() {
                   openCreateEditor(assignee, new Date().toISOString().slice(0, 10), "task")
                 }
                 onDelete={handleDeleteTask}
-                onEdit={(task) =>
+                onEdit={(task: DevOpsTask) =>
                   setEditorState({
                     mode: "edit",
                     taskId: task.id,
                     initialTask: {
-                      ...task,
+                      project: task.project,
+                      requester: task.requester,
+                      title: task.title,
+                      assignee: task.assignee,
+                      startDate: task.startDate,
+                      endDate: task.endDate,
+                      labels: task.labels,
                       completed: task.completed ?? false,
+                      taskType: task.taskType ?? "task",
+                      leaveReason: task.leaveReason ?? "",
                     },
                   })
                 }
@@ -555,8 +563,16 @@ export default function DashboardPage() {
                 mode: "edit",
                 taskId: task.id,
                 initialTask: {
-                  ...task,
+                  project: task.project,
+                  requester: task.requester,
+                  title: task.title,
+                  assignee: task.assignee,
+                  startDate: task.startDate,
+                  endDate: task.endDate,
+                  labels: task.labels,
                   completed: task.completed ?? false,
+                  taskType: task.taskType ?? "task",
+                  leaveReason: task.leaveReason ?? "",
                 },
               })
             }
@@ -566,36 +582,20 @@ export default function DashboardPage() {
           />
         )}
       </div>
+
       {editorState ? (
         <TaskEditModal
           assigneeOptions={assigneeOptions}
           initialTask={editorState.initialTask}
           mode={editorState.mode}
           onClose={() => setEditorState(null)}
-          onDelete={
-            editorState.mode === "edit" && editorState.taskId
-              ? async () => {
-                  const existingTask = tasks.find((task) => task.id === editorState.taskId);
-                  if (!existingTask) {
-                    throw new Error("Entry not found.");
-                  }
-
-                  await handleDeleteTask(existingTask);
-                }
-              : undefined
-          }
-          onSubmit={async (taskDraft) => {
+          onSubmit={async (task) => {
             if (editorState.mode === "create") {
-              await handleCreateTask(taskDraft);
-              setEditorState(null);
-              return;
+              await handleCreateTask(task);
+            } else if (editorState.taskId) {
+              await handleUpdateTask(editorState.taskId, task);
             }
 
-            if (!editorState.taskId) {
-              throw new Error("Missing task id for update.");
-            }
-
-            await handleUpdateTask(editorState.taskId, taskDraft);
             setEditorState(null);
           }}
           requesterOptions={requesterOptions}
@@ -603,24 +603,6 @@ export default function DashboardPage() {
       ) : null}
     </main>
   );
-}
-
-function getInclusiveDuration(startDate: string, endDate: string) {
-  const start = new Date(`${startDate}T00:00:00`);
-  const end = new Date(`${endDate}T00:00:00`);
-  const diff = end.getTime() - start.getTime();
-  return Math.round(diff / (24 * 60 * 60 * 1000)) + 1;
-}
-
-function addDaysToIsoDate(isoDate: string, days: number) {
-  const date = new Date(`${isoDate}T00:00:00`);
-  date.setDate(date.getDate() + days);
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
 }
 
 function DashboardStat({
@@ -632,23 +614,14 @@ function DashboardStat({
   value: number;
   tone: string;
 }) {
-  const isBadgeTone = tone.startsWith("bg-");
-
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-slate-50 p-4 shadow-sm">
-      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
-      <div className="mt-3 flex items-center gap-3">
-        <span className="text-3xl font-semibold text-slate-900">{value}</span>
-        <span
-          className={
-            isBadgeTone
-              ? `rounded-md px-2 py-1 text-[11px] font-semibold ${tone}`
-              : "rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600"
-          }
-        >
-          Live
-        </span>
+    <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 shadow-sm">
+      <div
+        className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${tone === "slate" ? "bg-slate-100 text-slate-600" : tone}`}
+      >
+        {label}
       </div>
+      <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">{value}</p>
     </div>
   );
 }
@@ -663,12 +636,11 @@ function PeopleSummaryCard({
   tone: string;
 }) {
   return (
-    <div className="rounded-xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
-      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
-      <div className="mt-3 flex items-center gap-3">
-        <span className="text-3xl font-semibold text-slate-900">{count}</span>
-        <span className={`rounded-md px-2 py-1 text-[11px] font-semibold ${tone}`}>Active</span>
-      </div>
+    <div className="rounded-2xl border border-white/70 bg-white/85 p-4 shadow-sm">
+      <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone}`}>
+        {label}
+      </span>
+      <p className="mt-3 text-2xl font-semibold text-slate-900">{count}</p>
     </div>
   );
 }
@@ -684,15 +656,34 @@ function ViewButton({
 }) {
   return (
     <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-md px-4 py-2 text-sm font-medium transition ${
+      className={`rounded-md px-3 py-2 text-sm font-medium transition ${
         active
-          ? "bg-slate-900 text-white shadow-sm"
-          : "text-slate-600 hover:bg-white hover:text-slate-900"
+          ? "bg-white text-slate-900 shadow-sm"
+          : "text-slate-500 hover:text-slate-900"
       }`}
+      onClick={onClick}
+      type="button"
     >
       {label}
     </button>
   );
+}
+
+function getInclusiveDuration(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  const millisecondsPerDay = 1000 * 60 * 60 * 24;
+
+  return Math.round((end.getTime() - start.getTime()) / millisecondsPerDay) + 1;
+}
+
+function addDaysToIsoDate(isoDate: string, numberOfDays: number) {
+  const date = new Date(`${isoDate}T00:00:00`);
+  date.setDate(date.getDate() + numberOfDays);
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }
