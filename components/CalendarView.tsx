@@ -93,7 +93,12 @@ export function CalendarView({
   const headerScrollRef = useRef<HTMLDivElement | null>(null);
   const bodyScrollRef = useRef<HTMLDivElement | null>(null);
   const syncingScrollRef = useRef<"header" | "body" | null>(null);
+  const hasCenteredTodayRef = useRef(false);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
+  const todayIndex = useMemo(
+    () => calendarDays.findIndex((day) => day.iso === todayIso),
+    [calendarDays, todayIso],
+  );
   const activeDayIndex = useMemo(() => {
     if (!interaction) {
       return null;
@@ -210,6 +215,36 @@ export function CalendarView({
     };
   }, [interaction, onEditTask, onMoveTask, onResizeTask]);
 
+  useEffect(() => {
+    hasCenteredTodayRef.current = false;
+  }, [todayIndex, calendarDays.length]);
+
+  useEffect(() => {
+    if (todayIndex === -1 || hasCenteredTodayRef.current) {
+      return;
+    }
+
+    const bodyNode = bodyScrollRef.current;
+    const headerNode = headerScrollRef.current;
+
+    if (!bodyNode) {
+      return;
+    }
+
+    const targetScrollLeft = Math.max(
+      0,
+      todayIndex * DAY_WIDTH - bodyNode.clientWidth / 2 + DAY_WIDTH / 2,
+    );
+
+    bodyNode.scrollLeft = targetScrollLeft;
+
+    if (headerNode) {
+      headerNode.scrollLeft = targetScrollLeft;
+    }
+
+    hasCenteredTodayRef.current = true;
+  }, [todayIndex]);
+
   const syncHorizontalScroll = (source: "header" | "body") => {
     if (syncingScrollRef.current && syncingScrollRef.current !== source) {
       return;
@@ -322,7 +357,9 @@ export function CalendarView({
                   <div
                     key={day.iso}
                     className={`border-r px-3 py-4 text-center last:border-r-0 ${
-                      day.isWeekend
+                      day.iso === todayIso
+                        ? "border-sky-200 bg-sky-100/90"
+                        : day.isWeekend
                         ? "border-rose-100 bg-rose-50/95"
                         : "border-white/70 bg-slate-100/95"
                     } ${
@@ -333,21 +370,33 @@ export function CalendarView({
                   >
                     <p
                       className={`text-sm font-semibold ${
-                        day.isWeekend ? "text-rose-700" : "text-slate-700"
+                        day.iso === todayIso
+                          ? "text-sky-800"
+                          : day.isWeekend
+                            ? "text-rose-700"
+                            : "text-slate-700"
                       }`}
                     >
                       {day.weekday}
                     </p>
                     <p
                       className={`mt-2 text-3xl font-semibold tracking-tight ${
-                        day.isWeekend ? "text-rose-900" : "text-slate-900"
+                        day.iso === todayIso
+                          ? "text-sky-950"
+                          : day.isWeekend
+                            ? "text-rose-900"
+                            : "text-slate-900"
                       }`}
                     >
                       {day.dayOfMonth}
                     </p>
                     <p
                       className={`mt-1 text-sm font-medium ${
-                        day.isWeekend ? "text-rose-600" : "text-slate-500"
+                        day.iso === todayIso
+                          ? "text-sky-700"
+                          : day.isWeekend
+                            ? "text-rose-600"
+                            : "text-slate-500"
                       }`}
                     >
                       {day.monthLabel}
@@ -405,6 +454,7 @@ export function CalendarView({
                     }}
                     rowHeight={row.rowHeight}
                     tasks={row.tasks}
+                    todayIso={todayIso}
                     tracks={row.tracks}
                   />
                 ))}
@@ -445,6 +495,7 @@ function TimelineRow({
   registerRowRef,
   rowHeight,
   tasks,
+  todayIso,
   tracks,
 }: {
   assignee: string;
@@ -459,6 +510,7 @@ function TimelineRow({
   registerRowRef: (node: HTMLDivElement | null) => void;
   rowHeight: number;
   tasks: DevOpsTask[];
+  todayIso: string;
   tracks: DevOpsTask[][];
 }) {
   return (
@@ -477,7 +529,9 @@ function TimelineRow({
           <div
             key={`${assignee}-${day.iso}`}
             className={`group relative border-r last:border-r-0 ${
-              day.isWeekend
+              day.iso === todayIso
+                ? "border-sky-200 bg-sky-50/80"
+                : day.isWeekend
                 ? "border-rose-100 bg-rose-50/60"
                 : "border-slate-100"
             } ${
