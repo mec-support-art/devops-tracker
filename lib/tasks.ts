@@ -11,6 +11,8 @@ export type DevOpsTask = {
 };
 
 export type NewTaskInput = Omit<DevOpsTask, "id" | "completed">;
+export type UpdateTaskInput = NewTaskInput & { completed: boolean };
+export type TaskStatus = keyof typeof TASK_STATUS_STYLES;
 
 export type TaskRecord = {
   id: number;
@@ -45,6 +47,20 @@ export const TASK_STATUS_STYLES = {
   },
 } as const;
 
+export function createEmptyTaskInput(): NewTaskInput {
+  const today = new Date().toISOString().slice(0, 10);
+
+  return {
+    project: "",
+    projectManager: "",
+    title: "",
+    assignee: "",
+    startDate: today,
+    endDate: today,
+    labels: [],
+  };
+}
+
 export function getTaskStatus(task: DevOpsTask) {
   if (task.completed) {
     return "onTrack";
@@ -65,6 +81,20 @@ export function getTaskStatus(task: DevOpsTask) {
   }
 
   return "onTrack";
+}
+
+export function normalizeTaskInput<T extends NewTaskInput | UpdateTaskInput>(task: T): T {
+  return {
+    ...task,
+    project: task.project.trim(),
+    projectManager: task.projectManager.trim(),
+    title: task.title.trim(),
+    assignee: task.assignee.trim(),
+    labels: task.labels
+      .map((label) => label.trim())
+      .filter(Boolean)
+      .filter((label, index, labels) => labels.indexOf(label) === index),
+  } as T;
 }
 
 export function formatDateLabel(dateString: string) {
@@ -119,15 +149,32 @@ export function toTask(record: TaskRecord): DevOpsTask {
 }
 
 export function toTaskInsert(task: NewTaskInput) {
+  const normalized = normalizeTaskInput(task);
+
   return {
-    project: task.project,
-    project_manager: task.projectManager,
-    title: task.title,
-    assignee: task.assignee,
-    start_date: task.startDate,
-    end_date: task.endDate,
-    labels: task.labels,
+    project: normalized.project,
+    project_manager: normalized.projectManager,
+    title: normalized.title,
+    assignee: normalized.assignee,
+    start_date: normalized.startDate,
+    end_date: normalized.endDate,
+    labels: normalized.labels,
     completed: false,
+  };
+}
+
+export function toTaskUpdate(task: UpdateTaskInput) {
+  const normalized = normalizeTaskInput(task);
+
+  return {
+    project: normalized.project,
+    project_manager: normalized.projectManager,
+    title: normalized.title,
+    assignee: normalized.assignee,
+    start_date: normalized.startDate,
+    end_date: normalized.endDate,
+    labels: normalized.labels,
+    completed: normalized.completed,
   };
 }
 

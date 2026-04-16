@@ -4,13 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AssigneeColumn } from "@/components/AssigneeColumn";
 import { CalendarView } from "@/components/CalendarView";
+import { TaskEditModal } from "@/components/TaskEditModal";
 import { TaskForm } from "@/components/TaskForm";
 import {
   TASK_STATUS_STYLES,
   assigneeOptions,
   getTaskStatus,
+  type TaskStatus,
   type DevOpsTask,
   type NewTaskInput,
+  type UpdateTaskInput,
 } from "@/lib/tasks";
 
 export default function DashboardPage() {
@@ -18,8 +21,14 @@ export default function DashboardPage() {
   const [activeView, setActiveView] = useState<"board" | "timeline">("board");
   const [selectedProject, setSelectedProject] = useState("All projects");
   const [selectedAssignee, setSelectedAssignee] = useState("All assignees");
+  const [selectedStatus, setSelectedStatus] = useState<"All statuses" | TaskStatus>(
+    "All statuses",
+  );
+  const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [editingTask, setEditingTask] = useState<DevOpsTask | null>(null);
+  const [busyTaskIds, setBusyTaskIds] = useState<number[]>([]);
 
   useEffect(() => {
     let ignore = false;
@@ -72,10 +81,25 @@ export default function DashboardPage() {
         selectedProject === "All projects" || task.project === selectedProject;
       const matchesAssignee =
         selectedAssignee === "All assignees" || task.assignee === selectedAssignee;
+      const matchesStatus =
+        selectedStatus === "All statuses" || getTaskStatus(task) === selectedStatus;
+      const query = searchQuery.trim().toLowerCase();
+      const matchesSearch =
+        query.length === 0 ||
+        [
+          task.title,
+          task.project,
+          task.projectManager,
+          task.assignee,
+          ...task.labels,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
 
-      return matchesProject && matchesAssignee;
+      return matchesProject && matchesAssignee && matchesStatus && matchesSearch;
     });
-  }, [tasks, selectedProject, selectedAssignee]);
+  }, [tasks, selectedAssignee, selectedProject, selectedStatus, searchQuery]);
 
   const groupedTasks = useMemo(() => {
     return assigneeOptions.map((assignee) => ({
@@ -119,6 +143,128 @@ export default function DashboardPage() {
     }
 
     setTasks((currentTasks) => [payload.task as DevOpsTask, ...currentTasks]);
+  };
+
+  const updateBusyState = (taskId: number, active: boolean) => {
+    setBusyTaskIds((current) =>
+      active ? [...new Set([...current, taskId])] : current.filter((id) => id !== taskId),
+    );
+  };
+
+  const handleUpdateTask = async (taskId: number, updatedTask: UpdateTaskInput) => {
+    setErrorMessage(null);
+    updateBusyState(taskId, true);
+
+    try {
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updatedTask),
+      });
+
+      const payload = (await response.json()) as {
+        task?: DevOpsTask;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.task) {
+        throw new Error(payload.error ?? "Unable to update task.");
+      }
+
+      setTasks((currentTasks) =>
+        currentTasks.map((task) => (task.id === taskId ? payload.task! : task)),
+      );
+    } finally {
+      updateBusyState(taskId, false);
+    }
+  };
+
+  const handleToggleCompleted = async (task: DevOpsTask) => {
+    await handleUpdateTask(task.id, {
+      project: task.project,
+      projectManager: task.projectManager,
+      title: task.title,
+      assignee: task.assignee,
+      startDate: task.startDate,
+      endDate: task.endDate,
+      labels: task.labels,
+      completed: !(task.completed ?? false),
+    });
+  };
+
+  const handleDeleteTask = async (task: DevOpsTask) => {
+    const confirmed = window.confirm(`Delete "${task.title}" from ${task.project}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setErrorMessage(null);
+    updateBusyState(task.id, true);
+
+    try {
+      const response = await fetch(`/api/tasks/${task.id}`, {
+        method: "DELETE",
+      });
+
+      const payload = (await response.json()) as { success?: boolean; error?: string };
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error ?? "Unable to delete task.");
+      }
+
+      setTasks((currentTasks) => currentTasks.filter((item) => item.id !== task.id));
+      if (editingTask?.id === task.id) {
+        setEditingTask(null);
+      }
+    } finally {
+      updateBusyState(task.id, false);
+    }
+  };
+
+  const handleMoveTask = async (
+    task: DevOpsTask,
+    nextAssignee: string,
+    nextStartDate: string,
+  ) => {
+    const duration = getInclusiveDuration(task.startDate, task.endDate);
+    const nextEndDate = addDaysToIsoDate(nextStartDate, duration - 1);
+
+    await handleUpdateTask(task.id, {
+      project: task.project,
+      projectManager: task.projectManager,
+      title: task.title,
+      assignee: nextAssignee,
+      startDate: nextStartDate,
+      endDate: nextEndDate,
+      labels: task.labels,
+      completed: task.completed ?? false,
+    });
+  };
+
+  const handleResizeTask = async (
+    task: DevOpsTask,
+    edge: "start" | "end",
+    nextDate: string,
+  ) => {
+    if (edge === "start" && nextDate > task.endDate) {
+      return;
+    }
+
+    if (edge === "end" && nextDate < task.startDate) {
+      return;
+    }
+
+    await handleUpdateTask(task.id, {
+      project: task.project,
+      projectManager: task.projectManager,
+      title: task.title,
+      assignee: task.assignee,
+      startDate: edge === "start" ? nextDate : task.startDate,
+      endDate: edge === "end" ? nextDate : task.endDate,
+      labels: task.labels,
+      completed: task.completed ?? false,
+    });
   };
 
   return (
@@ -187,6 +333,12 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row">
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search task, project, manager, assignee, or label"
+                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 sm:min-w-80"
+              />
               <select
                 value={selectedProject}
                 onChange={(event) => setSelectedProject(event.target.value)}
@@ -207,6 +359,18 @@ export default function DashboardPage() {
                   <option key={assignee}>{assignee}</option>
                 ))}
               </select>
+              <select
+                value={selectedStatus}
+                onChange={(event) =>
+                  setSelectedStatus(event.target.value as "All statuses" | TaskStatus)
+                }
+                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+              >
+                <option>All statuses</option>
+                <option value="onTrack">On track</option>
+                <option value="inProgress">In progress</option>
+                <option value="overdue">Overdue</option>
+              </select>
             </div>
           </div>
         </section>
@@ -218,15 +382,56 @@ export default function DashboardPage() {
         ) : activeView === "board" ? (
           <section className="grid gap-4 xl:grid-cols-4">
             {groupedTasks.map(({ assignee, tasks: assigneeTasks }) => (
-              <AssigneeColumn key={assignee} assignee={assignee} tasks={assigneeTasks} />
+              <AssigneeColumn
+                key={assignee}
+                assignee={assignee}
+                busyTaskIds={busyTaskIds}
+                onDelete={handleDeleteTask}
+                onEdit={setEditingTask}
+                onToggleCompleted={handleToggleCompleted}
+                tasks={assigneeTasks}
+              />
             ))}
           </section>
         ) : (
-          <CalendarView tasks={filteredTasks} />
+          <CalendarView
+            busyTaskIds={busyTaskIds}
+            onEditTask={setEditingTask}
+            onMoveTask={handleMoveTask}
+            onResizeTask={handleResizeTask}
+            tasks={filteredTasks}
+          />
         )}
       </div>
+      {editingTask ? (
+        <TaskEditModal
+          onClose={() => setEditingTask(null)}
+          onSubmit={async (updatedTask) => {
+            await handleUpdateTask(editingTask.id, updatedTask);
+          }}
+          task={editingTask}
+        />
+      ) : null}
     </main>
   );
+}
+
+function getInclusiveDuration(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  const diff = end.getTime() - start.getTime();
+  return Math.round(diff / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function addDaysToIsoDate(isoDate: string, days: number) {
+  const date = new Date(`${isoDate}T00:00:00`);
+  date.setDate(date.getDate() + days);
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }
 
 function DashboardStat({

@@ -1,10 +1,20 @@
 import { TASK_STATUS_STYLES, formatDateLabel, getTaskStatus, type DevOpsTask } from "@/lib/tasks";
 
 type TaskCardProps = {
+  isBusy?: boolean;
+  onDelete: (task: DevOpsTask) => Promise<void>;
+  onEdit: (task: DevOpsTask) => void;
+  onToggleCompleted: (task: DevOpsTask) => Promise<void>;
   task: DevOpsTask;
 };
 
-export function TaskCard({ task }: TaskCardProps) {
+export function TaskCard({
+  isBusy = false,
+  onDelete,
+  onEdit,
+  onToggleCompleted,
+  task,
+}: TaskCardProps) {
   const status = getTaskStatus(task);
   const statusStyle = TASK_STATUS_STYLES[status];
 
@@ -40,6 +50,33 @@ export function TaskCard({ task }: TaskCardProps) {
             {label}
           </span>
         ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+        <button
+          type="button"
+          onClick={() => void onToggleCompleted(task)}
+          disabled={isBusy}
+          className="rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {task.completed ? "Mark active" : "Mark complete"}
+        </button>
+        <button
+          type="button"
+          onClick={() => onEdit(task)}
+          disabled={isBusy}
+          className="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={() => void onDelete(task)}
+          disabled={isBusy}
+          className="rounded-full border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Delete
+        </button>
       </div>
     </article>
   );
